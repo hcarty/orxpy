@@ -1,0 +1,5 @@
+.DS_Store
+*.log
+bin/*
+**/obj/**
+data/map/world/**
