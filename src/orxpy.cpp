@@ -41,6 +41,15 @@ static orxOBJECT *o;
  */
 void orxpy::Update(const orxCLOCK_INFO &_rstClockInfo)
 {
+  auto vm = pVM;
+
+  try
+  {
+    auto pyUpdate = vm->_main->attr()["update"];
+    vm->call(pyUpdate, py::py_var(vm, _rstClockInfo.fDT));
+  }
+  CATCH_EXCEPTION()
+
   // Should quit?
   if (orxInput_IsActive("Quit"))
   {
@@ -980,6 +989,23 @@ namespace pythonwrapper
 #undef RETURN_OR_NONE
 }
 
+py::CodeObject_ orxPy_ReadSource(const orxSTRING zPath)
+{
+  // Load map resource
+  auto resourceLocation = orxResource_Locate("Python", zPath);
+  orxASSERT(resourceLocation != orxNULL);
+  orxHANDLE hResource = orxResource_Open(resourceLocation, orxFALSE);
+  orxS64 s64Size = orxResource_GetSize(hResource);
+  orxCHAR *pBuffer;
+  pBuffer = (orxCHAR *)orxMemory_Allocate(s64Size, orxMEMORY_TYPE_MAIN);
+  orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
+  orxResource_Close(hResource);
+  orxASSERT(s64Size == s64Read);
+  py::CodeObject_ pyCompiled = pVM->compile(pBuffer, zPath, py::EXEC_MODE);
+  orxMemory_Free(pBuffer);
+  return pyCompiled;
+}
+
 void orxPy_AddVectorModule(py::VM *vm)
 {
   // Register command module
@@ -1166,11 +1192,6 @@ void orxPy_AddModules(py::VM *vm)
  */
 orxSTATUS orxpy::Init()
 {
-  // Display a small hint in console
-  orxLOG("\n* This template project creates a simple scene"
-         "\n* You can play with the config parameters in ../data/config/orxpy.ini"
-         "\n* After changing them, relaunch the executable to see the changes.");
-
   // Init extensions
   InitExtensions();
 
@@ -1179,19 +1200,25 @@ orxSTATUS orxpy::Init()
   orxPy_AddModules(vm);
 
   // Create the scene
-  auto scene = CreateObject("Scene");
-  o = scene->GetOrxObject();
+  // auto scene = CreateObject("Scene");
+  // o = scene->GetOrxObject();
 
   orxConfig_PushSection("Python");
-  auto source = orxConfig_GetString("Source");
-  auto compiled = vm->compile(source, "<config>", py::CompileMode::EXEC_MODE);
+  const orxSTRING zSource = orxConfig_GetString("Source");
+  py::CodeObject_ pyCodeObject = orxPy_ReadSource(zSource);
   try
   {
-    vm->_exec(compiled, vm->_main);
+    vm->_exec(pyCodeObject, vm->_main);
   }
   CATCH_EXCEPTION()
-
   orxConfig_PopSection();
+
+  try
+  {
+    auto pyInit = vm->_main->attr()["init"];
+    vm->call(pyInit);
+  }
+  CATCH_EXCEPTION()
 
   // Done!
   return orxSTATUS_SUCCESS;
@@ -1201,15 +1228,6 @@ orxSTATUS orxpy::Init()
  */
 orxSTATUS orxpy::Run()
 {
-  auto vm = pVM;
-
-  try
-  {
-    auto pyUpdate = vm->_main->attr()["update"];
-    vm->call(pyUpdate, py::py_var(vm, o));
-  }
-  CATCH_EXCEPTION()
-
   // Return orxSTATUS_FAILURE to instruct orx to quit
   return orxSTATUS_SUCCESS;
 }
