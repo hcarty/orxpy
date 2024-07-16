@@ -3,11 +3,11 @@ import object
 scene: object.Object
 moving_right: bool = True
 
-def init():
+def orx_init():
   global scene
   scene = object.create_object("Scene")
 
-def update(_dt: float):
+def orx_update(_dt: float):
   global moving_right
   logo = object.find_child(scene, "Object")
   if logo is not None:
@@ -21,3 +21,6 @@ def update(_dt: float):
       if pos.x < -100:
         moving_right = True
     object.set_position(logo, pos)
+
+def orx_exit():
+  return

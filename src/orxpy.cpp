@@ -22,33 +22,97 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 namespace py = pkpy;
 
-#define CATCH_EXCEPTION()                              \
-  catch (py::Exception & py_exc)                       \
-  {                                                    \
-    std::cerr << py_exc.summary();                     \
-    exit(1);                                           \
-  }                                                    \
-  catch (std::exception & e)                           \
-  {                                                    \
-    std::cerr << py::_S("std::exception: ", e.what()); \
-    exit(1);                                           \
+#define orxPY_KZ_CONFIG_SECTION "Python"
+
+#define orxPY_KZ_DEFAULT_INIT "orx_init"
+#define orxPY_KZ_DEFAULT_UPDATE "orx_update"
+#define orxPY_KZ_DEFAULT_EXIT "orx_exit"
+
+struct orxPYTHON_CALLBACKS
+{
+  py::PyVar pyInit = nullptr;
+  py::PyVar pyUpdate = nullptr;
+  py::PyVar pyExit = nullptr;
+};
+
+static py::VM *pVM = nullptr;
+static orxPYTHON_CALLBACKS stPyCallbacks{};
+
+void orxPy_InitCallbacks(py::VM *vm, orxPYTHON_CALLBACKS *pstPyCallbacks)
+{
+  // Value defined in the main module referenced by name
+  py::NameDict &dAttrs = vm->_main->attr();
+
+  // Get functions by name
+  orxConfig_PushSection(orxPY_KZ_CONFIG_SECTION);
+  const orxSTRING zName = orxSTRING_EMPTY;
+
+  zName = orxConfig_HasValue("Init") ? orxConfig_GetString("Init") : orxPY_KZ_DEFAULT_INIT;
+  if (dAttrs.contains(zName))
+  {
+    pstPyCallbacks->pyInit = dAttrs[zName];
   }
 
-static py::VM *pVM;
-static orxOBJECT *o;
+  zName = orxConfig_HasValue("Update") ? orxConfig_GetString("Update") : orxPY_KZ_DEFAULT_UPDATE;
+  if (dAttrs.contains(zName))
+  {
+    pstPyCallbacks->pyUpdate = dAttrs[zName];
+  }
+
+  zName = orxConfig_HasValue("Exit") ? orxConfig_GetString("Exit") : orxPY_KZ_DEFAULT_EXIT;
+  if (dAttrs.contains(zName))
+  {
+    pstPyCallbacks->pyExit = dAttrs[zName];
+  }
+
+  orxConfig_PopSection();
+}
+
+orxSTATUS orxPy_Call(py::VM *vm, py::PyVar pyCallable)
+{
+  orxSTATUS eResult = orxSTATUS_FAILURE;
+
+  if (pyCallable != nullptr && vm != nullptr)
+  {
+    try
+    {
+      vm->call(pyCallable);
+      eResult = orxSTATUS_SUCCESS;
+    }
+    catch (py::Exception &py_exc)
+    {
+      orxLOG("%s", py_exc.summary().data);
+    }
+  }
+
+  return eResult;
+}
+
+orxSTATUS orxPy_Call1(py::VM *vm, py::PyVar pyCallable, py::PyVar pyArg)
+{
+  orxSTATUS eResult = orxSTATUS_FAILURE;
+
+  if (pyCallable != nullptr && vm != nullptr)
+  {
+    try
+    {
+      vm->call(pyCallable, pyArg);
+      eResult = orxSTATUS_SUCCESS;
+    }
+    catch (py::Exception &py_exc)
+    {
+      orxLOG("%s", py_exc.summary().data);
+    }
+  }
+
+  return eResult;
+}
 
 /** Update function, it has been registered to be called every tick of the core clock
  */
 void orxpy::Update(const orxCLOCK_INFO &_rstClockInfo)
 {
-  auto vm = pVM;
-
-  try
-  {
-    auto pyUpdate = vm->_main->attr()["update"];
-    vm->call(pyUpdate, py::py_var(vm, _rstClockInfo.fDT));
-  }
-  CATCH_EXCEPTION()
+  orxPy_Call1(pVM, stPyCallbacks.pyUpdate, py::py_var(pVM, _rstClockInfo.fDT));
 
   // Should quit?
   if (orxInput_IsActive("Quit"))
@@ -989,8 +1053,10 @@ namespace pythonwrapper
 #undef RETURN_OR_NONE
 }
 
-py::CodeObject_ orxPy_ReadSource(const orxSTRING zPath)
+orxSTATUS orxPy_ExecSource(py::VM *vm, const orxSTRING zPath)
 {
+  orxSTATUS eResult = orxSTATUS_SUCCESS;
+
   // Load map resource
   auto resourceLocation = orxResource_Locate("Python", zPath);
   orxASSERT(resourceLocation != orxNULL);
@@ -1001,9 +1067,15 @@ py::CodeObject_ orxPy_ReadSource(const orxSTRING zPath)
   orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
   orxResource_Close(hResource);
   orxASSERT(s64Size == s64Read);
-  py::CodeObject_ pyCompiled = pVM->compile(pBuffer, zPath, py::EXEC_MODE);
+
+  py::PyVar pExecResult = vm->exec(pBuffer, zPath, py::EXEC_MODE);
+  if (pExecResult == nullptr)
+  {
+    eResult = orxSTATUS_FAILURE;
+  }
+
   orxMemory_Free(pBuffer);
-  return pyCompiled;
+  return eResult;
 }
 
 void orxPy_AddVectorModule(py::VM *vm)
@@ -1188,6 +1260,29 @@ void orxPy_AddModules(py::VM *vm)
   orxPy_AddObjectModule(vm);
 }
 
+orxSTATUS orxPy_InitVM(py::VM *vm)
+{
+  orxSTATUS eResult = orxSTATUS_FAILURE;
+
+  // Add core orx modules to the VM
+  orxPy_AddModules(vm);
+
+  // Get Python source location
+  orxConfig_PushSection("Python");
+  const orxSTRING zSource = orxConfig_GetString("Source");
+  orxConfig_PopSection();
+
+  // Read and compile Python source
+  eResult = orxPy_ExecSource(vm, zSource);
+
+  return eResult;
+}
+
+void orxPy_Exit(py::VM *vm)
+{
+  delete vm;
+}
+
 /** Init function, it is called when all orx's modules have been initialized
  */
 orxSTATUS orxpy::Init()
@@ -1195,33 +1290,19 @@ orxSTATUS orxpy::Init()
   // Init extensions
   InitExtensions();
 
-  auto vm = new py::VM();
-  pVM = vm;
-  orxPy_AddModules(vm);
+  pVM = new py::VM();
+  orxASSERT(pVM != nullptr);
 
-  // Create the scene
-  // auto scene = CreateObject("Scene");
-  // o = scene->GetOrxObject();
+  orxSTATUS eResult = orxPy_InitVM(pVM);
 
-  orxConfig_PushSection("Python");
-  const orxSTRING zSource = orxConfig_GetString("Source");
-  py::CodeObject_ pyCodeObject = orxPy_ReadSource(zSource);
-  try
+  if (eResult == orxSTATUS_SUCCESS)
   {
-    vm->_exec(pyCodeObject, vm->_main);
+    orxPy_InitCallbacks(pVM, &stPyCallbacks);
+    orxPy_Call(pVM, stPyCallbacks.pyInit);
   }
-  CATCH_EXCEPTION()
-  orxConfig_PopSection();
-
-  try
-  {
-    auto pyInit = vm->_main->attr()["init"];
-    vm->call(pyInit);
-  }
-  CATCH_EXCEPTION()
 
   // Done!
-  return orxSTATUS_SUCCESS;
+  return eResult;
 }
 
 /** Run function, it should not contain any game logic
@@ -1236,10 +1317,13 @@ orxSTATUS orxpy::Run()
  */
 void orxpy::Exit()
 {
+  orxPy_Call(pVM, stPyCallbacks.pyExit);
+
   // Exit from extensions
   ExitExtensions();
 
-  delete pVM;
+  // Exit and clean up Python VM
+  orxPy_Exit(pVM);
 
   // Let orx clean all our mess automatically. :)
 }
