@@ -1,26 +1,26 @@
+import input
 import object
+import vector
 
-scene: object.Object
-moving_right: bool = True
+logo: object.Object
+
+def get_input() -> vector.Vector:
+  return vector.Vector(input.get_value("Right") - input.get_value("Left"), input.get_value("Down") - input.get_value("Up"), 0)
 
 def orx_init():
-  global scene
+  global logo
   scene = object.create_object("Scene")
+  child = object.find_child(scene, "Object")
+  if child is None:
+    raise ValueError("No logo defined in the scene!")
+  logo = child
 
 def orx_update(_dt: float):
-  global moving_right
-  logo = object.find_child(scene, "Object")
-  if logo is not None:
-    pos = object.get_position(logo)
-    if moving_right:
-      pos.x += 1
-      if pos.x > 100:
-        moving_right = False
-    else:
-      pos.x -= 1
-      if pos.x < -100:
-        moving_right = True
-    object.set_position(logo, pos)
+  pos = object.get_position(logo)
+  movement = get_input()
+  pos.x += movement.x
+  pos.y += movement.y
+  object.set_position(logo, pos)
 
 def orx_exit():
   return

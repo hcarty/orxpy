@@ -112,10 +112,10 @@ orxSTATUS orxPy_Call1(py::VM *vm, py::PyVar pyCallable, py::PyVar pyArg)
  */
 void orxpy::Update(const orxCLOCK_INFO &_rstClockInfo)
 {
-  orxPy_Call1(pVM, stPyCallbacks.pyUpdate, py::py_var(pVM, _rstClockInfo.fDT));
+  orxSTATUS eResult = orxPy_Call1(pVM, stPyCallbacks.pyUpdate, py::py_var(pVM, _rstClockInfo.fDT));
 
   // Should quit?
-  if (orxInput_IsActive("Quit"))
+  if (eResult == orxSTATUS_FAILURE || orxInput_IsActive("Quit"))
   {
     // Send close event
     orxEvent_SendShort(orxEVENT_TYPE_SYSTEM, orxSYSTEM_EVENT_CLOSE);
@@ -1004,6 +1004,8 @@ namespace pythonwrapper
     RETURN_NONE;
   }
 
+  // Command functions
+
   BIND(evaluate)
   {
     ARG(orxSTRING, zCommand, 0);
@@ -1020,15 +1022,91 @@ namespace pythonwrapper
     RETURN_NONE;
   }
 
+  // Input functions
+
+  BIND(push_set)
+  {
+    ARG(const orxSTRING, zName, 0);
+    orxInput_PushSet(zName);
+    RETURN_NONE;
+  }
+
+  BIND(pop_set)
+  {
+    orxInput_PopSet();
+    RETURN_NONE;
+  }
+
+  BIND(enable_set)
+  {
+    ARG(const orxSTRING, zName, 0);
+    ARG(orxBOOL, bEnable, 1);
+    orxInput_EnableSet(zName, bEnable);
+    RETURN_NONE;
+  }
+
+  BIND(is_set_enabled)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_IsSetEnabled(zName));
+  }
+
+  BIND(is_active)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_IsActive(zName));
+  }
+
+  BIND(has_been_activated)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_HasBeenActivated(zName));
+  }
+
+  BIND(has_been_deactivated)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_HasBeenDeactivated(zName));
+  }
+
+  BIND(get_value)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_GetValue(zName));
+  }
+
+  BIND(set_value)
+  {
+    ARG(const orxSTRING, zName, 0);
+    ARG(orxFLOAT, fValue, 1);
+    ARG(bool, bPermanent, 2);
+    if (bPermanent)
+    {
+      orxInput_SetPermanentValue(zName, fValue);
+    }
+    else
+    {
+      orxInput_SetValue(zName, fValue);
+    }
+    RETURN_NONE;
+  }
+
+  BIND(reset_value)
+  {
+    ARG(const orxSTRING, zName, 0);
+    RETURN(orxInput_ResetValue(zName));
+  }
+
   // Type wrappers
 
-  py::PyVar vector_init(py::VM *vm, py::ArgsView args)
+  py::PyVar vector_new(py::VM *vm, py::ArgsView args)
   {
-    orxVECTOR self = py::py_cast<orxVECTOR>(vm, args[0]);
-    self.fX = py_cast<orxFLOAT>(vm, args[1]);
-    self.fY = py_cast<orxFLOAT>(vm, args[2]);
-    self.fZ = py_cast<orxFLOAT>(vm, args[3]);
-    RETURN_NONE;
+    py::PyVar pyVec = vm->new_user_object<orxVECTOR>();
+    orxVECTOR &vNew = py_cast<orxVECTOR &>(vm, pyVec);
+    vNew.fX = py_cast<orxFLOAT>(vm, args[1]);
+    vNew.fY = py_cast<orxFLOAT>(vm, args[2]);
+    vNew.fZ = py_cast<orxFLOAT>(vm, args[3]);
+    return pyVec;
   }
 
   void vector(py::VM *vm, py::PyVar mod, py::PyVar type)
@@ -1039,7 +1117,7 @@ namespace pythonwrapper
     vm->bind_field(type, "z", &orxVECTOR::fZ);
 
     // __init__ method
-    vm->bind(type, "__init__(self, x, y, z)", vector_init);
+    vm->bind(type, "__new__(cls, x, y, z)", vector_new);
   }
 
   void object(py::VM *vm, py::PyVar mod, py::PyVar type) {}
@@ -1252,11 +1330,34 @@ void orxPy_AddCommandModule(py::VM *vm)
   vm->bind(mod, "evaluate(command: str, guid: int | None = None) -> None", evaluate);
 }
 
+void orxPy_AddInputModule(py::VM *vm)
+{
+  // Register command module
+  py::PyVar mod = vm->new_module("input");
+
+  using namespace pythonwrapper;
+
+  // Bind input functions
+  vm->bind(mod, "push_set(name: str) -> None", push_set);
+  vm->bind(mod, "pop_set() -> None", pop_set);
+  vm->bind(mod, "enable_set(name: str, enable: bool = True) -> None", enable_set);
+  vm->bind(mod, "is_set_enabled(name: str) -> bool", is_set_enabled);
+
+  vm->bind(mod, "is_active(name: str) -> bool", is_active);
+  vm->bind(mod, "has_been_activated(name: str) -> bool", has_been_activated);
+  vm->bind(mod, "has_been_deactivated(name: str) -> bool", has_been_deactivated);
+
+  vm->bind(mod, "get_value(name: str) -> float", get_value);
+  vm->bind(mod, "set_value(name: str, value: float, permanent: bool = False) -> None", set_value);
+  vm->bind(mod, "reset_value(name: str) -> None", reset_value);
+}
+
 void orxPy_AddModules(py::VM *vm)
 {
   orxPy_AddVectorModule(vm);
   orxPy_AddConfigModule(vm);
   orxPy_AddCommandModule(vm);
+  orxPy_AddInputModule(vm);
   orxPy_AddObjectModule(vm);
 }
 
@@ -1298,7 +1399,7 @@ orxSTATUS orxpy::Init()
   if (eResult == orxSTATUS_SUCCESS)
   {
     orxPy_InitCallbacks(pVM, &stPyCallbacks);
-    orxPy_Call(pVM, stPyCallbacks.pyInit);
+    eResult = orxPy_Call(pVM, stPyCallbacks.pyInit);
   }
 
   // Done!
