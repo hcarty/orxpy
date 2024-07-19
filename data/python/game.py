@@ -2,10 +2,9 @@ import input
 import object
 import vector
 
-logo: object.Object
+import utils
 
-def get_input() -> vector.Vector:
-  return vector.Vector(input.get_value("Right") - input.get_value("Left"), input.get_value("Down") - input.get_value("Up"), 0)
+logo: object.Object
 
 def orx_init():
   global logo
@@ -17,7 +16,7 @@ def orx_init():
 
 def orx_update(_dt: float):
   pos = object.get_position(logo)
-  movement = get_input()
+  movement = utils.get_input()
   pos.x += movement.x
   pos.y += movement.y
   object.set_position(logo, pos)

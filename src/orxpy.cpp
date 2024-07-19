@@ -48,6 +48,42 @@ struct orxPYTHON_CALLBACKS
 static py::VM *pVM = nullptr;
 static orxPYTHON_CALLBACKS stPyCallbacks{};
 
+orxCHAR *orxPy_ReadSource(const orxSTRING zPath, int *pSize)
+{
+  orxASSERT(pSize != orxNULL);
+  *pSize = 0;
+
+  orxCHAR *pBuffer = orxNULL;
+
+  // Load map resource
+  const orxCHAR *resourceLocation = orxResource_Locate(orxPY_KZ_RESOURCE, zPath);
+  if (resourceLocation != orxNULL)
+  {
+    orxHANDLE hResource = orxResource_Open(resourceLocation, orxFALSE);
+    orxASSERT(hResource != orxHANDLE_UNDEFINED);
+
+    orxS64 s64Size = orxResource_GetSize(hResource);
+    // pBuffer = (orxCHAR *)orxMemory_Allocate(s64Size, orxMEMORY_TYPE_MAIN);
+    pBuffer = (orxCHAR *)malloc(s64Size);
+    orxASSERT(pBuffer != orxNULL);
+
+    orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
+    orxResource_Close(hResource);
+    orxASSERT(s64Size == s64Read);
+
+    *pSize = s64Read;
+  }
+
+  return pBuffer;
+}
+
+unsigned char *orxPy_ImportHandler(const char *zName, int *size)
+{
+  orxCHAR *pBuffer = orxPy_ReadSource(zName, size);
+
+  return (unsigned char *)pBuffer;
+}
+
 void orxPy_InitCallbacks(py::VM *vm, orxPYTHON_CALLBACKS *pstPyCallbacks)
 {
   // Value defined in the main module referenced by name
@@ -1157,27 +1193,19 @@ orxSTATUS orxPy_ExecSource(py::VM *vm, const orxSTRING zPath)
 {
   orxSTATUS eResult = orxSTATUS_FAILURE;
 
-  // Load map resource
-  const orxCHAR *resourceLocation = orxResource_Locate(orxPY_KZ_RESOURCE, zPath);
-  if (resourceLocation != orxNULL)
+  // Load source
+  int iSize;
+  orxCHAR *pBuffer = orxPy_ReadSource(zPath, &iSize);
+
+  if (pBuffer != orxNULL)
   {
-    orxHANDLE hResource = orxResource_Open(resourceLocation, orxFALSE);
-    orxASSERT(hResource != orxHANDLE_UNDEFINED);
-
-    orxS64 s64Size = orxResource_GetSize(hResource);
-    orxCHAR *pBuffer;
-    pBuffer = (orxCHAR *)orxMemory_Allocate(s64Size, orxMEMORY_TYPE_MAIN);
-    orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
-    orxResource_Close(hResource);
-    orxASSERT(s64Size == s64Read);
-
     py::PyVar pExecResult = vm->exec(pBuffer, zPath, py::EXEC_MODE);
     if (pExecResult != nullptr)
     {
       eResult = orxSTATUS_SUCCESS;
     }
 
-    orxMemory_Free(pBuffer);
+    free(pBuffer);
   }
 
   return eResult;
@@ -1397,6 +1425,9 @@ orxSTATUS orxPy_InitVM(py::VM *&vm)
   // Initialize VM, with or without os support enabled
   vm = new (std::nothrow) py::VM(orxConfig_GetBool(orxPY_KZ_CONFIG_ENABLE_OS));
 
+  // Setup hooks for imports
+  vm->_import_handler = orxPy_ImportHandler;
+
   if (vm != nullptr)
   {
     // Add core orx modules to the VM
@@ -1428,9 +1459,6 @@ orxSTATUS orxpy::Init()
 {
   // Init extensions
   InitExtensions();
-
-  pVM = new py::VM();
-  orxASSERT(pVM != nullptr);
 
   orxSTATUS eResult = orxPy_InitVM(pVM);
 
