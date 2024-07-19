@@ -22,7 +22,17 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 namespace py = pkpy;
 
+#define orxPY_KZ_RESOURCE "Python"
+
 #define orxPY_KZ_CONFIG_SECTION "Python"
+#define orxPY_KZ_CONFIG_MAIN "Main"
+#define orxPY_KZ_CONFIG_ENABLE_OS "EnableOS"
+
+#define orxPY_KZ_CONFIG_INIT "Init"
+#define orxPY_KZ_CONFIG_UPDATE "Update"
+#define orxPY_KZ_CONFIG_EXIT "Exit"
+
+#define orxPY_KZ_COMMAND_EXEC "Python.Exec"
 
 #define orxPY_KZ_DEFAULT_INIT "orx_init"
 #define orxPY_KZ_DEFAULT_UPDATE "orx_update"
@@ -47,19 +57,19 @@ void orxPy_InitCallbacks(py::VM *vm, orxPYTHON_CALLBACKS *pstPyCallbacks)
   orxConfig_PushSection(orxPY_KZ_CONFIG_SECTION);
   const orxSTRING zName = orxSTRING_EMPTY;
 
-  zName = orxConfig_HasValue("Init") ? orxConfig_GetString("Init") : orxPY_KZ_DEFAULT_INIT;
+  zName = orxConfig_HasValue(orxPY_KZ_CONFIG_INIT) ? orxConfig_GetString(orxPY_KZ_CONFIG_INIT) : orxPY_KZ_DEFAULT_INIT;
   if (dAttrs.contains(zName))
   {
     pstPyCallbacks->pyInit = dAttrs[zName];
   }
 
-  zName = orxConfig_HasValue("Update") ? orxConfig_GetString("Update") : orxPY_KZ_DEFAULT_UPDATE;
+  zName = orxConfig_HasValue(orxPY_KZ_CONFIG_UPDATE) ? orxConfig_GetString(orxPY_KZ_CONFIG_UPDATE) : orxPY_KZ_DEFAULT_UPDATE;
   if (dAttrs.contains(zName))
   {
     pstPyCallbacks->pyUpdate = dAttrs[zName];
   }
 
-  zName = orxConfig_HasValue("Exit") ? orxConfig_GetString("Exit") : orxPY_KZ_DEFAULT_EXIT;
+  zName = orxConfig_HasValue(orxPY_KZ_CONFIG_EXIT) ? orxConfig_GetString(orxPY_KZ_CONFIG_EXIT) : orxPY_KZ_DEFAULT_EXIT;
   if (dAttrs.contains(zName))
   {
     pstPyCallbacks->pyExit = dAttrs[zName];
@@ -106,6 +116,18 @@ orxSTATUS orxPy_Call1(py::VM *vm, py::PyVar pyCallable, py::PyVar pyArg)
   }
 
   return eResult;
+}
+
+void orxPy_CommandPyExec(orxU32 _u32ArgNumber, const orxCOMMAND_VAR *_astArgList, orxCOMMAND_VAR *_pstResult)
+{
+  /* Execute source */
+  py::PyVar pyResult = pVM->exec(_astArgList[0].zValue);
+
+  /* Set result */
+  _pstResult->bValue = pyResult == nullptr ? orxFALSE : orxTRUE;
+
+  /* Done! */
+  return;
 }
 
 /** Update function, it has been registered to be called every tick of the core clock
@@ -1133,26 +1155,31 @@ namespace pythonwrapper
 
 orxSTATUS orxPy_ExecSource(py::VM *vm, const orxSTRING zPath)
 {
-  orxSTATUS eResult = orxSTATUS_SUCCESS;
+  orxSTATUS eResult = orxSTATUS_FAILURE;
 
   // Load map resource
-  auto resourceLocation = orxResource_Locate("Python", zPath);
-  orxASSERT(resourceLocation != orxNULL);
-  orxHANDLE hResource = orxResource_Open(resourceLocation, orxFALSE);
-  orxS64 s64Size = orxResource_GetSize(hResource);
-  orxCHAR *pBuffer;
-  pBuffer = (orxCHAR *)orxMemory_Allocate(s64Size, orxMEMORY_TYPE_MAIN);
-  orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
-  orxResource_Close(hResource);
-  orxASSERT(s64Size == s64Read);
-
-  py::PyVar pExecResult = vm->exec(pBuffer, zPath, py::EXEC_MODE);
-  if (pExecResult == nullptr)
+  const orxCHAR *resourceLocation = orxResource_Locate(orxPY_KZ_RESOURCE, zPath);
+  if (resourceLocation != orxNULL)
   {
-    eResult = orxSTATUS_FAILURE;
+    orxHANDLE hResource = orxResource_Open(resourceLocation, orxFALSE);
+    orxASSERT(hResource != orxHANDLE_UNDEFINED);
+
+    orxS64 s64Size = orxResource_GetSize(hResource);
+    orxCHAR *pBuffer;
+    pBuffer = (orxCHAR *)orxMemory_Allocate(s64Size, orxMEMORY_TYPE_MAIN);
+    orxS64 s64Read = orxResource_Read(hResource, s64Size, pBuffer, orxNULL, orxNULL);
+    orxResource_Close(hResource);
+    orxASSERT(s64Size == s64Read);
+
+    py::PyVar pExecResult = vm->exec(pBuffer, zPath, py::EXEC_MODE);
+    if (pExecResult != nullptr)
+    {
+      eResult = orxSTATUS_SUCCESS;
+    }
+
+    orxMemory_Free(pBuffer);
   }
 
-  orxMemory_Free(pBuffer);
   return eResult;
 }
 
@@ -1361,20 +1388,31 @@ void orxPy_AddModules(py::VM *vm)
   orxPy_AddObjectModule(vm);
 }
 
-orxSTATUS orxPy_InitVM(py::VM *vm)
+orxSTATUS orxPy_InitVM(py::VM *&vm)
 {
   orxSTATUS eResult = orxSTATUS_FAILURE;
 
-  // Add core orx modules to the VM
-  orxPy_AddModules(vm);
+  orxConfig_PushSection(orxPY_KZ_CONFIG_SECTION);
 
-  // Get Python source location
-  orxConfig_PushSection("Python");
-  const orxSTRING zSource = orxConfig_GetString("Source");
+  // Initialize VM, with or without os support enabled
+  vm = new (std::nothrow) py::VM(orxConfig_GetBool(orxPY_KZ_CONFIG_ENABLE_OS));
+
+  if (vm != nullptr)
+  {
+    // Add core orx modules to the VM
+    orxPy_AddModules(vm);
+
+    if (orxConfig_HasValue(orxPY_KZ_CONFIG_MAIN))
+    {
+      // Get Python main source location
+      const orxSTRING zSource = orxConfig_GetString(orxPY_KZ_CONFIG_MAIN);
+
+      // Read and compile main Python source
+      eResult = orxPy_ExecSource(vm, zSource);
+    }
+  }
+
   orxConfig_PopSection();
-
-  // Read and compile Python source
-  eResult = orxPy_ExecSource(vm, zSource);
 
   return eResult;
 }
@@ -1399,6 +1437,7 @@ orxSTATUS orxpy::Init()
   if (eResult == orxSTATUS_SUCCESS)
   {
     orxPy_InitCallbacks(pVM, &stPyCallbacks);
+    orxCOMMAND_REGISTER(orxPY_KZ_COMMAND_EXEC, orxPy_CommandPyExec, "Result", orxCOMMAND_VAR_TYPE_STRING, 1, 0, {"Source", orxCOMMAND_VAR_TYPE_STRING});
     eResult = orxPy_Call(pVM, stPyCallbacks.pyInit);
   }
 
@@ -1422,6 +1461,9 @@ void orxpy::Exit()
 
   // Exit from extensions
   ExitExtensions();
+
+  // Unregister Python commands
+  orxCOMMAND_UNREGISTER(orxPY_KZ_COMMAND_EXEC);
 
   // Exit and clean up Python VM
   orxPy_Exit(pVM);
