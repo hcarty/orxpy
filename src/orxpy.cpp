@@ -182,29 +182,51 @@ void orxpy::Update(const orxCLOCK_INFO &_rstClockInfo)
 
 namespace pythonwrapper
 {
+  template <typename T>
+  struct PyPtr
+  {
+    T *ptr;
+
+    PyPtr() = delete;
+    PyPtr(T *p) : ptr(p) {}
+  };
+
+  using orxPyObject = PyPtr<orxOBJECT>;
+
 #define BIND(NAME) py::PyVar NAME(py::VM *vm, py::ArgsView args)
-#define ARG(type, name, index) type name = py::py_cast<type>(vm, args[index])
-#define OBJECT ARG(orxOBJECT *, pstObject, 0)
-#define ARG_OR_NONE(type, name, index)         \
-  type name;                                   \
-  if (args[index] == vm->None)                 \
-  {                                            \
-    name = orxNULL;                            \
-  }                                            \
-  else                                         \
-  {                                            \
-    name = py::py_cast<type>(vm, args[index]); \
+#define ARG_VALUE(type, name, index) type name = py::py_cast<type>(vm, args[index])
+#define ARG_PTR(type, name, index) type *name = (py::py_cast<PyPtr<type>>(vm, args[index])).ptr
+#define OBJECT ARG_PTR(orxOBJECT, pstObject, 0)
+#define ARG_PTR_OR_NONE(type, name, index)                  \
+  type *name;                                               \
+  if (args[index] == vm->None)                              \
+  {                                                         \
+    name = orxNULL;                                         \
+  }                                                         \
+  else                                                      \
+  {                                                         \
+    name = (py::py_cast<PyPtr<type>>(vm, args[index])).ptr; \
   }
-#define RETURN(RET) return py::py_var(vm, RET)
+#define RETURN_VALUE(RET) return py::py_var(vm, RET)
+#define RETURN_PTR(RET) return py::py_var(vm, PyPtr(RET))
 #define RETURN_NONE return vm->None
-#define RETURN_OR_NONE(RET) \
-  if (RET != orxNULL)       \
-  {                         \
-    RETURN(RET);            \
-  }                         \
-  else                      \
-  {                         \
-    RETURN_NONE;            \
+#define RETURN_VALUE_OR_NONE(RET) \
+  if (RET != orxNULL)             \
+  {                               \
+    RETURN_VALUE(RET);            \
+  }                               \
+  else                            \
+  {                               \
+    RETURN_NONE;                  \
+  }
+#define RETURN_PTR_OR_NONE(RET) \
+  if (RET != orxNULL)           \
+  {                             \
+    RETURN_PTR(RET);            \
+  }                             \
+  else                          \
+  {                             \
+    RETURN_NONE;                \
   }
 
   // Function wrappers
@@ -213,16 +235,9 @@ namespace pythonwrapper
 
   BIND(create_object)
   {
-    ARG(const orxSTRING, zName, 0);
+    ARG_VALUE(const orxSTRING, zName, 0);
     orxOBJECT *pstObject = orxObject_CreateFromConfig(zName);
-    if (pstObject != orxNULL)
-    {
-      RETURN(pstObject);
-    }
-    else
-    {
-      RETURN_NONE;
-    }
+    RETURN_PTR_OR_NONE(pstObject);
   }
 
   BIND(delete_object)
@@ -235,21 +250,21 @@ namespace pythonwrapper
   BIND(get_guid)
   {
     OBJECT;
-    RETURN(orxStructure_GetGUID(orxSTRUCTURE(pstObject)));
+    RETURN_VALUE(orxStructure_GetGUID(orxSTRUCTURE(pstObject)));
   }
 
   BIND(from_guid)
   {
-    ARG(orxU64, u64GUID, 0);
+    ARG_VALUE(orxU64, u64GUID, 0);
     orxOBJECT *pstObject = orxOBJECT(orxStructure_Get(u64GUID));
-    RETURN_OR_NONE(pstObject);
+    RETURN_PTR_OR_NONE(pstObject);
   }
 
   BIND(enable_object)
   {
     OBJECT;
-    ARG(bool, bState, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(bool, bState, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_EnableRecursive(pstObject, bState);
@@ -264,14 +279,14 @@ namespace pythonwrapper
   BIND(is_enabled)
   {
     OBJECT;
-    RETURN(orxObject_IsEnabled(pstObject));
+    RETURN_VALUE(orxObject_IsEnabled(pstObject));
   }
 
   BIND(pause)
   {
     OBJECT;
-    ARG(bool, bState, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(bool, bState, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_PauseRecursive(pstObject, bState);
@@ -286,13 +301,13 @@ namespace pythonwrapper
   BIND(is_paused)
   {
     OBJECT;
-    RETURN(orxObject_IsPaused(pstObject));
+    RETURN_VALUE(orxObject_IsPaused(pstObject));
   }
 
   BIND(set_owner)
   {
     OBJECT;
-    ARG_OR_NONE(orxOBJECT *, pstOwner, 1);
+    ARG_PTR_OR_NONE(orxOBJECT, pstOwner, 1);
     orxObject_SetParent(pstObject, (void *)pstOwner);
     RETURN_NONE;
   }
@@ -301,22 +316,22 @@ namespace pythonwrapper
   {
     OBJECT;
     orxOBJECT *pstOwner = orxOBJECT(orxObject_GetOwner(pstObject));
-    RETURN_OR_NONE(pstOwner);
+    RETURN_PTR_OR_NONE(pstOwner);
   }
 
   BIND(find_owned_child)
   {
     OBJECT;
-    ARG(const orxSTRING, zPath, 1);
+    ARG_VALUE(const orxSTRING, zPath, 1);
     orxOBJECT *pstChild = orxObject_FindOwnedChild(pstObject, zPath);
-    RETURN_OR_NONE(pstChild);
+    RETURN_PTR_OR_NONE(pstChild);
   }
 
   BIND(set_flip)
   {
     OBJECT;
-    ARG(bool, bFlipX, 1);
-    ARG(bool, bFlipY, 2);
+    ARG_VALUE(bool, bFlipX, 1);
+    ARG_VALUE(bool, bFlipY, 2);
     orxObject_SetFlip(pstObject, bFlipX, bFlipY);
     RETURN_NONE;
   }
@@ -329,14 +344,14 @@ namespace pythonwrapper
     py::Tuple pyResult(2);
     pyResult[0] = VAR(bFlipX);
     pyResult[1] = VAR(bFlipY);
-    RETURN(pyResult);
+    RETURN_VALUE(pyResult);
   }
 
   BIND(set_position)
   {
     OBJECT;
-    orxVECTOR vPosition = py::py_cast<orxVECTOR>(vm, args[1]);
-    ARG(bool, bWorld, 2);
+    ARG_VALUE(orxVECTOR, vPosition, 1);
+    ARG_VALUE(bool, bWorld, 2);
     if (bWorld)
     {
       orxObject_SetWorldPosition(pstObject, &vPosition);
@@ -351,7 +366,7 @@ namespace pythonwrapper
   BIND(get_position)
   {
     OBJECT;
-    ARG(bool, bWorld, 1);
+    ARG_VALUE(bool, bWorld, 1);
     orxVECTOR vPosition;
     if (bWorld)
     {
@@ -361,13 +376,13 @@ namespace pythonwrapper
     {
       orxObject_GetPosition(pstObject, &vPosition);
     }
-    RETURN(vPosition);
+    RETURN_VALUE(vPosition);
   }
 
   BIND(set_parent)
   {
     OBJECT;
-    ARG_OR_NONE(orxOBJECT *, pstParent, 1);
+    ARG_PTR_OR_NONE(orxOBJECT, pstParent, 1);
     orxObject_SetParent(pstObject, pstParent);
     RETURN_NONE;
   }
@@ -376,21 +391,21 @@ namespace pythonwrapper
   {
     OBJECT;
     orxOBJECT *pstParent = orxOBJECT(orxObject_GetParent(pstObject));
-    RETURN_OR_NONE(pstParent);
+    RETURN_PTR_OR_NONE(pstParent);
   }
 
   BIND(find_child)
   {
     OBJECT;
-    ARG(const orxSTRING, zPath, 1);
+    ARG_VALUE(const orxSTRING, zPath, 1);
     orxOBJECT *pstChild = orxObject_FindChild(pstObject, zPath);
-    RETURN_OR_NONE(pstChild);
+    RETURN_PTR_OR_NONE(pstChild);
   }
 
   BIND(attach)
   {
     OBJECT;
-    ARG(orxOBJECT *, pstParent, 1);
+    ARG_PTR(orxOBJECT, pstParent, 1);
     orxObject_Attach(pstObject, (void *)pstParent);
     RETURN_NONE;
   }
@@ -412,8 +427,8 @@ namespace pythonwrapper
   BIND(set_anim_frequency)
   {
     OBJECT;
-    ARG(orxFLOAT, fFrequency, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxFLOAT, fFrequency, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetAnimFrequencyRecursive(pstObject, fFrequency);
@@ -428,14 +443,14 @@ namespace pythonwrapper
   BIND(get_anim_frequency)
   {
     OBJECT;
-    RETURN(orxObject_GetAnimFrequency(pstObject));
+    RETURN_VALUE(orxObject_GetAnimFrequency(pstObject));
   }
 
   BIND(set_anim_time)
   {
     OBJECT;
-    ARG(orxFLOAT, fTime, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxFLOAT, fTime, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetAnimTimeRecursive(pstObject, fTime);
@@ -450,14 +465,14 @@ namespace pythonwrapper
   BIND(get_anim_time)
   {
     OBJECT;
-    RETURN(orxObject_GetAnimTime(pstObject));
+    RETURN_VALUE(orxObject_GetAnimTime(pstObject));
   }
 
   BIND(set_current_anim)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetCurrentAnimRecursive(pstObject, zName);
@@ -472,14 +487,14 @@ namespace pythonwrapper
   BIND(get_current_anim)
   {
     OBJECT;
-    RETURN(orxObject_GetCurrentAnim(pstObject));
+    RETURN_VALUE(orxObject_GetCurrentAnim(pstObject));
   }
 
   BIND(set_target_anim)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetTargetAnimRecursive(pstObject, zName);
@@ -494,14 +509,14 @@ namespace pythonwrapper
   BIND(get_target_anim)
   {
     OBJECT;
-    RETURN(orxObject_GetTargetAnim(pstObject));
+    RETURN_VALUE(orxObject_GetTargetAnim(pstObject));
   }
 
   BIND(set_speed)
   {
     OBJECT;
-    ARG(orxVECTOR, vSpeed, 1);
-    ARG(bool, bRelative, 2);
+    ARG_VALUE(orxVECTOR, vSpeed, 1);
+    ARG_VALUE(bool, bRelative, 2);
     if (bRelative)
     {
       orxObject_SetRelativeSpeed(pstObject, &vSpeed);
@@ -516,7 +531,7 @@ namespace pythonwrapper
   BIND(get_speed)
   {
     OBJECT;
-    ARG(bool, bRelative, 1);
+    ARG_VALUE(bool, bRelative, 1);
     orxVECTOR vSpeed = orxVECTOR_0;
     if (bRelative)
     {
@@ -526,13 +541,13 @@ namespace pythonwrapper
     {
       orxObject_GetSpeed(pstObject, &vSpeed);
     }
-    RETURN(vSpeed);
+    RETURN_VALUE(vSpeed);
   }
 
   BIND(set_angular_velocity)
   {
     OBJECT;
-    ARG(orxFLOAT, fVelocity, 1);
+    ARG_VALUE(orxFLOAT, fVelocity, 1);
     orxObject_SetAngularVelocity(pstObject, fVelocity);
     RETURN_NONE;
   }
@@ -540,13 +555,13 @@ namespace pythonwrapper
   BIND(get_angular_velocity)
   {
     OBJECT;
-    RETURN(orxObject_GetAngularVelocity(pstObject));
+    RETURN_VALUE(orxObject_GetAngularVelocity(pstObject));
   }
 
   BIND(set_custom_gravity)
   {
     OBJECT;
-    ARG(orxVECTOR, vGravity, 1);
+    ARG_VALUE(orxVECTOR, vGravity, 1);
     orxObject_SetCustomGravity(pstObject, &vGravity);
     RETURN_NONE;
   }
@@ -556,13 +571,13 @@ namespace pythonwrapper
     OBJECT;
     orxVECTOR vGravity = orxVECTOR_0;
     orxObject_GetCustomGravity(pstObject, &vGravity);
-    RETURN(vGravity);
+    RETURN_VALUE(vGravity);
   }
 
   BIND(get_mass)
   {
     OBJECT;
-    RETURN(orxObject_GetMass(pstObject));
+    RETURN_VALUE(orxObject_GetMass(pstObject));
   }
 
   BIND(get_mass_center)
@@ -570,13 +585,13 @@ namespace pythonwrapper
     OBJECT;
     orxVECTOR vCenter = orxVECTOR_0;
     orxObject_GetMassCenter(pstObject, &vCenter);
-    RETURN(vCenter);
+    RETURN_VALUE(vCenter);
   }
 
   BIND(apply_torque)
   {
     OBJECT;
-    ARG(orxFLOAT, fTorque, 1);
+    ARG_VALUE(orxFLOAT, fTorque, 1);
     orxObject_ApplyTorque(pstObject, fTorque);
     RETURN_NONE;
   }
@@ -584,8 +599,8 @@ namespace pythonwrapper
   BIND(apply_force)
   {
     OBJECT;
-    ARG(orxVECTOR, vForce, 1);
-    ARG(orxVECTOR, vPoint, 2);
+    ARG_VALUE(orxVECTOR, vForce, 1);
+    ARG_VALUE(orxVECTOR, vPoint, 2);
     orxObject_ApplyForce(pstObject, &vForce, &vPoint);
     RETURN_NONE;
   }
@@ -593,25 +608,25 @@ namespace pythonwrapper
   BIND(apply_impulse)
   {
     OBJECT;
-    ARG(orxVECTOR, vImpulse, 1);
-    ARG(orxVECTOR, vPoint, 2);
+    ARG_VALUE(orxVECTOR, vImpulse, 1);
+    ARG_VALUE(orxVECTOR, vPoint, 2);
     orxObject_ApplyImpulse(pstObject, &vImpulse, &vPoint);
     RETURN_NONE;
   }
 
   BIND(raycast)
   {
-    ARG(orxVECTOR, vBegin, 0);
-    ARG(orxVECTOR, vEnd, 1);
-    ARG(orxU16, u16SelfFlags, 2);
-    ARG(orxU16, u16CheckMask, 3);
-    ARG(orxBOOL, bEarlyExit, 4);
+    ARG_VALUE(orxVECTOR, vBegin, 0);
+    ARG_VALUE(orxVECTOR, vEnd, 1);
+    ARG_VALUE(orxU16, u16SelfFlags, 2);
+    ARG_VALUE(orxU16, u16CheckMask, 3);
+    ARG_VALUE(orxBOOL, bEarlyExit, 4);
     orxVECTOR vContact;
     orxVECTOR vNormal;
     orxOBJECT *pstDetected = orxObject_Raycast(&vBegin, &vEnd, u16SelfFlags, u16CheckMask, bEarlyExit, &vContact, &vNormal);
     if (pstDetected != orxNULL)
     {
-      RETURN(py::Tuple(py::py_var(vm, pstDetected), py::py_var(vm, vContact), py::py_var(vm, vNormal)));
+      RETURN_VALUE(py::Tuple(py::py_var(vm, pstDetected), py::py_var(vm, vContact), py::py_var(vm, vNormal)));
     }
     else
     {
@@ -622,7 +637,7 @@ namespace pythonwrapper
   BIND(set_text_string)
   {
     OBJECT;
-    ARG(orxSTRING, zString, 1);
+    ARG_VALUE(orxSTRING, zString, 1);
     orxObject_SetTextString(pstObject, zString);
     RETURN_NONE;
   }
@@ -630,16 +645,16 @@ namespace pythonwrapper
   BIND(get_text_string)
   {
     OBJECT;
-    RETURN(orxObject_GetTextString(pstObject));
+    RETURN_VALUE(orxObject_GetTextString(pstObject));
   }
 
   BIND(add_fx)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
-    ARG(bool, bUnique, 3);
-    ARG(orxFLOAT, fPropagationDelay, 4);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
+    ARG_VALUE(bool, bUnique, 3);
+    ARG_VALUE(orxFLOAT, fPropagationDelay, 4);
     if (bRecursive && bUnique)
     {
       orxObject_AddUniqueFXRecursive(pstObject, zName, fPropagationDelay);
@@ -662,8 +677,8 @@ namespace pythonwrapper
   BIND(remove_fx)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_RemoveFXRecursive(pstObject, zName);
@@ -678,7 +693,7 @@ namespace pythonwrapper
   BIND(remove_all_fxs)
   {
     OBJECT;
-    ARG(bool, bRecursive, 1);
+    ARG_VALUE(bool, bRecursive, 1);
     if (bRecursive)
     {
       orxObject_RemoveAllFXsRecursive(pstObject);
@@ -693,7 +708,7 @@ namespace pythonwrapper
   BIND(add_sound)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
+    ARG_VALUE(orxSTRING, zName, 1);
     orxObject_AddSound(pstObject, zName);
     RETURN_NONE;
   }
@@ -701,7 +716,7 @@ namespace pythonwrapper
   BIND(remove_sound)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
+    ARG_VALUE(orxSTRING, zName, 1);
     orxObject_RemoveSound(pstObject, zName);
     RETURN_NONE;
   }
@@ -716,7 +731,7 @@ namespace pythonwrapper
   BIND(set_volume)
   {
     OBJECT;
-    ARG(orxFLOAT, fVolume, 1);
+    ARG_VALUE(orxFLOAT, fVolume, 1);
     orxObject_SetVolume(pstObject, fVolume);
     RETURN_NONE;
   }
@@ -724,7 +739,7 @@ namespace pythonwrapper
   BIND(set_pitch)
   {
     OBJECT;
-    ARG(orxFLOAT, fPitch, 1);
+    ARG_VALUE(orxFLOAT, fPitch, 1);
     orxObject_SetPitch(pstObject, fPitch);
     RETURN_NONE;
   }
@@ -732,8 +747,8 @@ namespace pythonwrapper
   BIND(set_panning)
   {
     OBJECT;
-    ARG(orxFLOAT, fPanning, 1);
-    ARG(orxBOOL, bMix, 2);
+    ARG_VALUE(orxFLOAT, fPanning, 1);
+    ARG_VALUE(orxBOOL, bMix, 2);
     orxObject_SetPanning(pstObject, fPanning, bMix);
     RETURN_NONE;
   }
@@ -755,7 +770,7 @@ namespace pythonwrapper
   BIND(add_filter)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
+    ARG_VALUE(orxSTRING, zName, 1);
     orxObject_AddFilter(pstObject, zName);
     RETURN_NONE;
   }
@@ -777,8 +792,8 @@ namespace pythonwrapper
   BIND(add_shader)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_AddShaderRecursive(pstObject, zName);
@@ -793,8 +808,8 @@ namespace pythonwrapper
   BIND(remove_shader)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_RemoveShaderRecursive(pstObject, zName);
@@ -809,7 +824,7 @@ namespace pythonwrapper
   BIND(enable_shader)
   {
     OBJECT;
-    ARG(orxBOOL, bEnabled, 1);
+    ARG_VALUE(orxBOOL, bEnabled, 1);
     orxObject_EnableShader(pstObject, bEnabled);
     RETURN_NONE;
   }
@@ -817,14 +832,14 @@ namespace pythonwrapper
   BIND(is_shader_enabled)
   {
     OBJECT;
-    RETURN(orxObject_IsShaderEnabled(pstObject));
+    RETURN_VALUE(orxObject_IsShaderEnabled(pstObject));
   }
 
   BIND(add_time_line_track)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_AddTimeLineTrackRecursive(pstObject, zName);
@@ -839,8 +854,8 @@ namespace pythonwrapper
   BIND(remove_time_line_track)
   {
     OBJECT;
-    ARG(orxSTRING, zName, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxSTRING, zName, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_RemoveTimeLineTrackRecursive(pstObject, zName);
@@ -855,7 +870,7 @@ namespace pythonwrapper
   BIND(enable_time_line)
   {
     OBJECT;
-    ARG(orxBOOL, bEnable, 1);
+    ARG_VALUE(orxBOOL, bEnable, 1);
     orxObject_EnableTimeLine(pstObject, bEnable);
     RETURN_NONE;
   }
@@ -863,20 +878,20 @@ namespace pythonwrapper
   BIND(is_time_line_enabled)
   {
     OBJECT;
-    RETURN(orxObject_IsTimeLineEnabled(pstObject));
+    RETURN_VALUE(orxObject_IsTimeLineEnabled(pstObject));
   }
 
   BIND(get_name)
   {
     OBJECT;
-    RETURN(orxObject_GetName(pstObject));
+    RETURN_VALUE(orxObject_GetName(pstObject));
   }
 
   BIND(set_rgb)
   {
     OBJECT;
-    ARG(orxVECTOR, vRGB, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxVECTOR, vRGB, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetRGBRecursive(pstObject, &vRGB);
@@ -893,14 +908,14 @@ namespace pythonwrapper
     OBJECT;
     orxVECTOR vRGB = orxVECTOR_0;
     orxObject_GetRGB(pstObject, &vRGB);
-    RETURN(vRGB);
+    RETURN_VALUE(vRGB);
   }
 
   BIND(set_alpha)
   {
     OBJECT;
-    ARG(orxFLOAT, fAlpha, 1);
-    ARG(bool, bRecursive, 2);
+    ARG_VALUE(orxFLOAT, fAlpha, 1);
+    ARG_VALUE(bool, bRecursive, 2);
     if (bRecursive)
     {
       orxObject_SetAlphaRecursive(pstObject, fAlpha);
@@ -915,7 +930,7 @@ namespace pythonwrapper
   BIND(get_alpha)
   {
     OBJECT;
-    RETURN(orxObject_GetAlpha(pstObject));
+    RETURN_VALUE(orxObject_GetAlpha(pstObject));
   }
 
   BIND(set_life_time)
@@ -924,7 +939,7 @@ namespace pythonwrapper
     py::PyVar pyLifeTime = args[1];
     if (py::is_float(pyLifeTime) || py::is_int(pyLifeTime))
     {
-      ARG(orxFLOAT, fLifeTime, 1);
+      ARG_VALUE(orxFLOAT, fLifeTime, 1);
       orxObject_SetLifeTime(pstObject, fLifeTime);
     }
     else if (pyLifeTime == vm->None)
@@ -933,7 +948,7 @@ namespace pythonwrapper
     }
     else
     {
-      ARG(orxSTRING, zLifeTime, 1);
+      ARG_VALUE(orxSTRING, zLifeTime, 1);
       orxObject_SetLiteralLifeTime(pstObject, zLifeTime);
     }
     RETURN_NONE;
@@ -949,20 +964,20 @@ namespace pythonwrapper
     }
     else
     {
-      RETURN(fLifeTime);
+      RETURN_VALUE(fLifeTime);
     }
   }
 
   BIND(get_active_time)
   {
     OBJECT;
-    RETURN(orxObject_GetActiveTime(pstObject));
+    RETURN_VALUE(orxObject_GetActiveTime(pstObject));
   }
 
   BIND(reset_active_time)
   {
     OBJECT;
-    ARG(bool, bRecursive, 1);
+    ARG_VALUE(bool, bRecursive, 1);
     if (bRecursive)
     {
       orxObject_ResetActiveTimeRecursive(pstObject);
@@ -978,7 +993,7 @@ namespace pythonwrapper
 
   BIND(push_section)
   {
-    ARG(orxSTRING, zSection, 0);
+    ARG_VALUE(orxSTRING, zSection, 0);
     orxConfig_PushSection(zSection);
     RETURN_NONE;
   }
@@ -992,15 +1007,15 @@ namespace pythonwrapper
 #define BIND_CONFIG_SET_GET(type, orxtype, name) \
   BIND(set_##type)                               \
   {                                              \
-    ARG(orxSTRING, zKey, 0);                     \
-    ARG(orxtype, name, 1);                       \
+    ARG_VALUE(orxSTRING, zKey, 0);               \
+    ARG_VALUE(orxtype, name, 1);                 \
     orxConfig_Set##name(zKey, name);             \
     RETURN_NONE;                                 \
   }                                              \
   BIND(get_##type)                               \
   {                                              \
-    ARG(orxSTRING, zKey, 0);                     \
-    RETURN(orxConfig_Get##name);                 \
+    ARG_VALUE(orxSTRING, zKey, 0);               \
+    RETURN_VALUE(orxConfig_Get##name);           \
   }
 
   BIND_CONFIG_SET_GET(bool, orxBOOL, Bool)
@@ -1011,53 +1026,53 @@ namespace pythonwrapper
 
   BIND(set_vector)
   {
-    ARG(orxSTRING, zKey, 0);
-    ARG(orxVECTOR, vValue, 1);
+    ARG_VALUE(orxSTRING, zKey, 0);
+    ARG_VALUE(orxVECTOR, vValue, 1);
     orxConfig_SetVector(zKey, &vValue);
     RETURN_NONE;
   }
 
   BIND(get_vector)
   {
-    ARG(orxSTRING, zKey, 0);
+    ARG_VALUE(orxSTRING, zKey, 0);
     orxVECTOR vValue = orxVECTOR_0;
     orxConfig_GetVector(zKey, &vValue);
-    RETURN(vValue);
+    RETURN_VALUE(vValue);
   }
 
 #undef BIND_SET_GET
 
   BIND(has_section)
   {
-    ARG(orxSTRING, zSection, 0);
-    RETURN(orxConfig_HasSection(zSection));
+    ARG_VALUE(orxSTRING, zSection, 0);
+    RETURN_VALUE(orxConfig_HasSection(zSection));
   }
 
   BIND(has_value)
   {
-    ARG(orxSTRING, zKey, 0);
-    ARG(bool, bCheckSpelling, 1);
+    ARG_VALUE(orxSTRING, zKey, 0);
+    ARG_VALUE(bool, bCheckSpelling, 1);
     if (bCheckSpelling)
     {
-      RETURN(orxConfig_HasValue(zKey));
+      RETURN_VALUE(orxConfig_HasValue(zKey));
     }
     else
     {
-      RETURN(orxConfig_HasValueNoCheck(zKey));
+      RETURN_VALUE(orxConfig_HasValueNoCheck(zKey));
     }
     orxASSERT(orxFALSE);
   }
 
   BIND(clear_section)
   {
-    ARG(orxSTRING, zSection, 0);
+    ARG_VALUE(orxSTRING, zSection, 0);
     orxConfig_ClearSection(zSection);
     RETURN_NONE;
   }
 
   BIND(clear_value)
   {
-    ARG(orxSTRING, zKey, 0);
+    ARG_VALUE(orxSTRING, zKey, 0);
     orxConfig_ClearValue(zKey);
     RETURN_NONE;
   }
@@ -1066,7 +1081,7 @@ namespace pythonwrapper
 
   BIND(evaluate)
   {
-    ARG(orxSTRING, zCommand, 0);
+    ARG_VALUE(orxSTRING, zCommand, 0);
     orxCOMMAND_VAR stResult;
     if (args[0] == vm->None)
     {
@@ -1074,7 +1089,7 @@ namespace pythonwrapper
     }
     else
     {
-      ARG(orxU64, u64GUID, 1);
+      ARG_VALUE(orxU64, u64GUID, 1);
       orxCommand_EvaluateWithGUID(zCommand, u64GUID, &stResult);
     }
     RETURN_NONE;
@@ -1084,7 +1099,7 @@ namespace pythonwrapper
 
   BIND(push_set)
   {
-    ARG(const orxSTRING, zName, 0);
+    ARG_VALUE(const orxSTRING, zName, 0);
     orxInput_PushSet(zName);
     RETURN_NONE;
   }
@@ -1097,47 +1112,47 @@ namespace pythonwrapper
 
   BIND(enable_set)
   {
-    ARG(const orxSTRING, zName, 0);
-    ARG(orxBOOL, bEnable, 1);
+    ARG_VALUE(const orxSTRING, zName, 0);
+    ARG_VALUE(orxBOOL, bEnable, 1);
     orxInput_EnableSet(zName, bEnable);
     RETURN_NONE;
   }
 
   BIND(is_set_enabled)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_IsSetEnabled(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_IsSetEnabled(zName));
   }
 
   BIND(is_active)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_IsActive(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_IsActive(zName));
   }
 
   BIND(has_been_activated)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_HasBeenActivated(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_HasBeenActivated(zName));
   }
 
   BIND(has_been_deactivated)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_HasBeenDeactivated(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_HasBeenDeactivated(zName));
   }
 
   BIND(get_value)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_GetValue(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_GetValue(zName));
   }
 
   BIND(set_value)
   {
-    ARG(const orxSTRING, zName, 0);
-    ARG(orxFLOAT, fValue, 1);
-    ARG(bool, bPermanent, 2);
+    ARG_VALUE(const orxSTRING, zName, 0);
+    ARG_VALUE(orxFLOAT, fValue, 1);
+    ARG_VALUE(bool, bPermanent, 2);
     if (bPermanent)
     {
       orxInput_SetPermanentValue(zName, fValue);
@@ -1151,8 +1166,8 @@ namespace pythonwrapper
 
   BIND(reset_value)
   {
-    ARG(const orxSTRING, zName, 0);
-    RETURN(orxInput_ResetValue(zName));
+    ARG_VALUE(const orxSTRING, zName, 0);
+    RETURN_VALUE(orxInput_ResetValue(zName));
   }
 
   // Type wrappers
@@ -1230,7 +1245,7 @@ void orxPy_AddObjectModule(py::VM *vm)
   using namespace pythonwrapper;
 
   // Register object type
-  vm->register_user_class<orxOBJECT *>(mod, "Object", object);
+  vm->register_user_class<orxPyObject>(mod, "Object", object);
 
   // Bind object functions
   vm->bind(mod, "create_object(name: str) -> Object | None", create_object);
